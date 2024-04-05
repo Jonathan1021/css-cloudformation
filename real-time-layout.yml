@@ -1,0 +1,346 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Real Time Layout
+
+Parameters:
+  GreengrassGroupName:
+    Type: String
+    Description: Nombre del grupo de AWS IoT Greengrass
+  KinesisDataStreamName:
+    Type: String
+    Description: Nombre del stream de Kinesis Data
+  KinesisVideoStreamBucketName:
+    Type: String
+    Description: Nombre del bucket stream video
+  CertificateSigningRequest:
+    Type: String
+    Description: Solicitud de firma de certificado x.509
+  QuickSightAnalysisName:
+    Type: String
+    Description: Nombre del análisis de QuickSight
+  QuickSightDataSetArn:
+    Type: String
+    Description: ARN del conjunto de datos de QuickSight
+  QuickSightDashboardName:
+    Type: String
+    Description: Nombre del dashboard de QuickSight
+
+Resources:
+  # IoT Components
+  IoTThingDefinition:
+    Type: "AWS::Greengrass::ResourceDefinition"
+    Properties:
+      Name: "IoTThingDefinition"
+      InitialVersion:
+        Resources:
+          - Id: "LocationSensor"
+            Name: "LocationSensor"
+            ResourceType: "AWS::IoT::Thing"
+            Properties:
+              ThingName: "LocationSensor"
+          - Id: "SpeedSensor"
+            Name: "SpeedSensor"
+            ResourceType: "AWS::IoT::Thing"
+            Properties:
+              ThingName: "SpeedSensor"
+          - Id: "TemperatureSensor"
+            Name: "TemperatureSensor"
+            ResourceType: "AWS::IoT::Thing"
+            Properties:
+              ThingName: "TemperatureSensor"
+          - Id: "AlertSensor"
+            Name: "AlertSensor"
+            ResourceType: "AWS::IoT::Thing"
+            Properties:
+              ThingName: "AlertSensor"
+
+  IoTConnectorDefinition:
+    Type: "AWS::Greengrass::ConnectorDefinition"
+    Properties:
+      Name: "IoTConnectorDefinition"
+      InitialVersion: {}
+
+  IoTGroup:
+    Type: "AWS::Greengrass::Group"
+    Properties:
+      Name: !Ref GreengrassGroupName
+      InitialVersion:
+        CoreDefinitionVersionArn: !GetAtt IoTCoreDefinition.VersionArn
+        FunctionDefinitionVersionArn: !GetAtt IoTFunctionDefinition.VersionArn
+        SubscriptionDefinitionVersionArn: !GetAtt IoTSubscriptionDefinition.VersionArn
+        ResourceDefinitionVersionArn: !GetAtt IoTResourceDefinition.VersionArn
+        ConnectorDefinitionVersionArn: !GetAtt IoTConnectorDefinition.VersionArn
+
+  IoTCoreDefinition:
+    Type: "AWS::Greengrass::CoreDefinition"
+    Properties:
+      Name: "IoTCoreDefinition"
+      InitialVersion:
+        Cores:
+          - Id: "core1"
+            ThingArn: !GetAtt CoreThing.Arn
+            CertificateArn: !GetAtt CoreCertificate.Arn
+            SyncShadow: true
+
+  CoreThing:
+    Type: "AWS::IoT::Thing"
+    Properties:
+      ThingName: "CoreThing"
+
+   Type: "AWS::IoT::Certificate"
+    Properties:
+      CertificateSigningRequest: !Ref CertificateSigningRequest
+      Status: "ACTIVE"
+
+  CoreThingRule:
+    Type: "AWS::IoT::TopicRule"
+    Properties:
+      RuleName: "CoreThingRule"
+      TopicRulePayload:
+        Sql: "SELECT * FROM 'iot/topic'"
+        Actions:
+          - Kinesis:
+              StreamName: !Ref KinesisDataStream
+              PartitionKey: "PartionsSensorKey"
+              RoleArn: !GetAtt KinesisDataStream.Arn
+
+  IotRule:
+    Type: "AWS::IoT::TopicRule"
+    Properties:
+      RuleName: "YourIotRule"
+      TopicRulePayload:
+        Sql: "SELECT * FROM 'iot/topic'"
+        Actions:
+          - Firehose:
+              DeliveryStreamName: !Ref FirehoseDeliveryStream
+
+  # Stream Kinesis
+  KinesisDataStream:
+    Type: "AWS::Kinesis::Stream"
+    Properties:
+      Name: !Ref KinesisDataStreamName
+      ShardCount: 1
+
+  KinesisAnalyticsApplication:
+    Type: "AWS::KinesisAnalytics::Application"
+    Properties:
+      ApplicationName: "KinesisAnalyticsApplication"
+      Inputs:
+        - NamePrefix: "SOURCE_SQL_STREAM"
+          InputSchema:
+            RecordColumns:
+              - Name: "deviceId"
+                SqlType: "VARCHAR(50)"
+                Mapping: "$.deviceId"
+              - Name: "timestamp"
+                SqlType: "TIMESTAMP"
+                Mapping: "$.timestamp"
+              - Name: "data"
+                SqlType: "VARCHAR(1024)"
+                Mapping: "$.data"
+          KinesisStreamsInput:
+            ResourceARN: !GetAtt KinesisDataStream.Arn
+            RoleARN: !GetAtt KinesisAnalyticsServiceRole.Arn
+      Outputs:
+        - Name: "SNSOutput"
+          DestinationSchema:
+            RecordFormatType: "JSON"
+          KinesisStreamsOutput:
+            ResourceARN: !Ref SNSTopic
+            RoleARN: !GetAtt KinesisAnalyticsServiceRole.Arn
+
+  KinesisVideoStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: KinesisVideoStream
+      MediaType: video/h264
+      RetentionPeriodHours: 48
+
+  FirehoseDeliveryStream:
+    Type: "AWS::KinesisFirehose::DeliveryStream"
+    Properties:
+      DeliveryStreamName: "MyFirehoseDeliveryStream"
+      S3DestinationConfiguration:
+        BucketARN: !GetAtt KinesisFirehoseStreamBucket.Arn
+        RoleARN: !GetAtt FirehoseRole.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 5
+        CompressionFormat: "UNCOMPRESSED"
+  
+  # Bucket
+  KinesisVideoStreamBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref KinesisVideoStreamBucketName
+
+  KinesisFirehoseStreamBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref KinesisFirehoseStreamBucketName
+
+  KinesisVideoStreamBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref KinesisVideoStreamBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "kinesisvideo.amazonaws.com"
+            Action: "s3:GetBucketAcl"
+            Resource: !Sub "arn:aws:s3:::${KinesisVideoStreamBucket}"
+          - Effect: "Allow"
+            Principal:
+              Service: "kinesisvideo.amazonaws.com"
+            Action:
+              - "s3:PutObject"
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetBucketLocation"
+            Resource: !Sub "arn:aws:s3:::${KinesisVideoStreamBucket}/*"
+
+  # SNS
+  SNSTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      DisplayName: "NotificationSensors"
+      TopicName: "NotificationSensors"
+
+  # QuickSigth
+  QuickSightAnalysis:
+    Type: AWS::QuickSight::Analysis
+    Properties:
+      AnalysisId: !Ref QuickSightAnalysisName
+      Name: !Ref QuickSightAnalysisName
+      Permissions:
+        - Principal: "*"
+          Actions:
+            - "quicksight:DescribeAnalysis"
+            - "quicksight:DescribeDataset"
+            - "quicksight:DescribeDataSource"
+            - "quicksight:QueryAnalysis"
+            - "quicksight:UpdateAnalysis"
+      SourceEntity:
+        SourceTemplate:
+          DataSetReferences:
+            - DataSetArn: !Ref QuickSightDataSetArn
+              DataSetPlaceholder: DataSetSensors
+
+  QuickSightDashboard:
+    Type: AWS::QuickSight::Dashboard
+    Properties:
+      AwsAccountId: !Ref "AWS::AccountId"
+      DashboardId: !Ref QuickSightDashboardName
+      Name: !Ref QuickSightDashboardName
+      Permissions:
+        - Principal: "*"
+          Actions:
+            - "quicksight:DescribeDashboard"
+            - "quicksight:ListDashboardVersions"
+            - "quicksight:UpdateDashboardPermissions"
+            - "quicksight:QueryDashboard"
+      SourceEntity:
+        Dashboard: 
+          Arn: !GetAtt QuickSightAnalysis.Arn
+          DataSetArns:
+            - !Ref QuickSightDataSetArn
+
+  # Role Kinesis
+  KinesisAnalyticsServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "kinesisanalytics.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "KinesisAnalyticsPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "kinesis:*"
+                Resource: "*"
+
+  KinesisVideoStreamPutMediaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "KinesisVideoStreamPutMediaPolicy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "kinesisvideo:PutMedia"
+            Resource: !GetAtt KinesisVideoStream.Arn
+      Roles:
+        - !Ref KinesisVideoStreamIAMRole
+
+  KinessiStreamRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "iot.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "KinesisPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "kinesis:PutRecord"
+                  - "kinesis:PutRecords"
+                Resource: !GetAtt KinesisDataStream.Arn
+  
+  FirehoseRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: "FirehoseRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "firehose.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "FirehosePolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:GetObject"
+                  - "s3:ListBucket"
+                  - "s3:ListBucketMultipartUploads"
+                  - "s3:PutObject"
+                Resource:
+                  - "arn:aws:s3:::YourBucketName"
+                  - "arn:aws:s3:::YourBucketName/*"
+              - Effect: "Allow"
+                Action:
+                  - "logs:PutLogEvents"
+                  - "logs:CreateLogStream"
+                Resource: "arn:aws:logs:*:*:*"
+
+Outputs:
+  QuickSightDashboardURL:
+    Description: URL del dashboard de AWS QuickSight
+    Value: !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/dashboards/${QuickSightDashboardName}/"
+
+                  
+
+
+
+
+                  

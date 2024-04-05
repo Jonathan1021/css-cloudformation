@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Layout Admin App
+
+Parameters:
+  DBName:
+    Type: String
+    Default: mydatabase
+    Description: Nombre de la base de datos
+  DBUsername:
+    Type: String
+    Default: admin
+    Description: Nombre de usuario de la base de datos
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: Contraseña de la base de datos
+  CognitoUserPoolName:
+    Type: String
+    Description: Nombre del grupo de usuarios de Cognito
+
+Resources:
+  # Cognito User Pool
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Ref CognitoUserPoolName
+      AutoVerifiedAttributes:
+        - email
+
+  # API Gateway
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: "MyApiGateway"
+
+  ApiGatewayAuthorizer:
+    Type: "AWS::ApiGateway::Authorizer"
+    Properties:
+      Name: "CognitoAuthorizer"
+      RestApiId: !Ref ApiGatewayRestApi
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      ProviderARNs:
+        - !GetAtt CognitoUserPool.Arn
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: "sensor"
+
+  ApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref ApiGatewayAuthorizer
+      HttpMethod: GET
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGatewayRestApi
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:states:action/StartExecution"
+          - { "AWS::Region": !Ref "AWS::Region", "StateMachineName": "HelloWorldStepFunction" }
+
+  HelloWorldStepFunction:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: "HelloWorldStepFunction"
+      DefinitionString: |
+        {
+          "StartAt": "HelloWorld",
+          "States": {
+            "HelloWorld": {
+              "Type": "Pass",
+              "Result": "Hello World!",
+              "End": true
+            }
+          }
+        }
+  
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet Group para la base de datos Aurora
+      SubnetIds:
+        - subnet-12345678
+        - subnet-87654321
+
+  DBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora
+      EngineMode: serverless
+      DatabaseName: !Ref DBName
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.medium
+      Engine: aurora-mysql
+      DBClusterIdentifier: !Ref DBCluster
+      PubliclyAccessible: true
+
+Outputs:
+  DBEndpoint:
+    Description: Endpoint de la base de datos
+    Value: !GetAtt DBCluster.Endpoint
+  CognitoUserPoolId:
+    Description: "ID del grupo de usuarios de Cognito"
+    Value: !Ref CognitoUserPool
+  ApiGatewayRestApiId:
+    Description: "ID del API Gateway"
+    Value: !Ref ApiGatewayRestApi
+  HelloWorldStepFunctionArn:
+    Description: "ARN de la función Step Functions HelloWorld"
+    Value: !GetAtt HelloWorldStepFunction.Arn
