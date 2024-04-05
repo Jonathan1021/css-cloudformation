@@ -63,12 +63,12 @@ Resources:
         Type: AWS
         Uri: !Sub
           - "arn:aws:apigateway:${AWS::Region}:states:action/StartExecution"
-          - { "AWS::Region": !Ref "AWS::Region", "StateMachineName": "HelloWorldStepFunction" }
+          - { "AWS::Region": !Ref "AWS::Region", "StateMachineName": "StepFunctionSensors" }
 
-  HelloWorldStepFunction:
+  StepFunctionSensors:
     Type: AWS::StepFunctions::StateMachine
     Properties:
-      StateMachineName: "HelloWorldStepFunction"
+      StateMachineName: "StepFunctionSensors"
       DefinitionString: |
         {
           "StartAt": "HelloWorld",
@@ -117,6 +117,6 @@ Outputs:
   ApiGatewayRestApiId:
     Description: "ID del API Gateway"
     Value: !Ref ApiGatewayRestApi
-  HelloWorldStepFunctionArn:
+  StepFunctionSensorsArn:
     Description: "ARN de la función Step Functions HelloWorld"
-    Value: !GetAtt HelloWorldStepFunction.Arn
+    Value: !GetAtt StepFunctionSensors.Arn
