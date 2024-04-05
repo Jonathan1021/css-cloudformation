@@ -164,3 +164,53 @@ This CloudFormation template provisions resources for a real-time data processin
 - **QuickSightDashboardURL**: URL to access the AWS QuickSight dashboard.
 
 This CloudFormation template orchestrates the setup of real-time data processing components using AWS services such as IoT Greengrass, Kinesis Data Streams, and QuickSight for analytics. Adjust the parameters and resources according to your use case and requirements.
+
+## Layout Onboarding
+
+This CloudFormation template sets up an onboarding application using AWS Amplify, AWS Lambda, and API Gateway.
+
+### Parameters
+
+- **GithubRepo**: GitHub repository for the web project.
+- **GithubOAuthToken**: OAuth token for GitHub to access the repository.
+
+### Resources
+
+#### AWS Amplify App
+
+- **OnboardingAmplifyApp**: Creates an AWS Amplify app for the onboarding project.
+  - **Name**: OnboardingApp
+  - **Repository**: GitHub repository specified by `GithubRepo`
+  - **OAuthToken**: GitHub OAuth token specified by `GithubOAuthToken`
+
+#### API Gateway
+
+- **OnboardingApi**: Sets up an API Gateway for the onboarding application.
+
+#### API Gateway Resources
+
+- **OnboardingApiResource**: Defines an API Gateway resource with the path `/onboarding`.
+
+#### API Gateway Method
+
+- **OnboardingApiGetMethod**: Configures a GET method for the API Gateway resource.
+  - **AuthorizationType**: AWS_IAM
+  - **Integration**: AWS Lambda function integration to handle the API request.
+
+#### Lambda Function
+
+- **LambdaDemo**: Creates a Lambda function named `LambdaDemo` to handle the API request.
+  - **Runtime**: Python 3.8
+  - **Handler**: `index.handler`
+  - **Code**: Returns a simple "Hello World!" response.
+
+#### IAM Role for Lambda
+
+- **LambdaRole**: Defines an IAM role for the Lambda function with necessary permissions.
+
+### Outputs
+
+- **OnboardingAmplifyAppId**: ID of the AWS Amplify app.
+- **OnboardingApiId**: ID of the API Gateway.
+
+This CloudFormation template automates the setup of an onboarding application with AWS Amplify, API Gateway, and a Lambda function. Adjust the parameters and resources as needed for your specific project requirements.
