@@ -337,10 +337,3 @@ Outputs:
   QuickSightDashboardURL:
     Description: URL del dashboard de AWS QuickSight
     Value: !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/dashboards/${QuickSightDashboardName}/"
-
-                  
-
-
-
-
-                  
